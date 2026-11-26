@@ -1,0 +1,217 @@
+{
+  "operations": {
+    "joinSuperdialCall": {
+      "request": {
+        "valid": {
+          "an agent's call device, English": {
+            "agent_user_id": "@agent_hermes:example.org",
+            "homeserver_url": "https://matrix.example.org",
+            "device": {
+              "device_id": "SUPERDIAL",
+              "access_token": "syt_example_token"
+            },
+            "voice": "af_heart",
+            "stt_language": "en"
+          },
+          "the speech service detects the language": {
+            "agent_user_id": "@agent_hermes:example.org",
+            "homeserver_url": "https://matrix.example.org",
+            "device": {
+              "device_id": "SUPERDIAL",
+              "access_token": "syt_example_token"
+            },
+            "voice": "af_heart",
+            "stt_language": null
+          }
+        },
+        "invalid": [
+          {
+            "why": "no device",
+            "body": {
+              "agent_user_id": "@agent_hermes:example.org",
+              "homeserver_url": "https://matrix.example.org",
+              "voice": "af_heart",
+              "stt_language": "en"
+            }
+          },
+          {
+            "why": "a device without its access token",
+            "body": {
+              "agent_user_id": "@agent_hermes:example.org",
+              "homeserver_url": "https://matrix.example.org",
+              "device": {
+                "device_id": "SUPERDIAL"
+              },
+              "voice": "af_heart",
+              "stt_language": "en"
+            }
+          },
+          {
+            "why": "no stt_language: null is sent to detect it",
+            "body": {
+              "agent_user_id": "@agent_hermes:example.org",
+              "homeserver_url": "https://matrix.example.org",
+              "device": {
+                "device_id": "SUPERDIAL",
+                "access_token": "syt_example_token"
+              },
+              "voice": "af_heart"
+            }
+          },
+          {
+            "why": "no voice",
+            "body": {
+              "agent_user_id": "@agent_hermes:example.org",
+              "homeserver_url": "https://matrix.example.org",
+              "device": {
+                "device_id": "SUPERDIAL",
+                "access_token": "syt_example_token"
+              },
+              "stt_language": "en"
+            }
+          },
+          {
+            "why": "a homeserver URL that is not http(s)",
+            "body": {
+              "agent_user_id": "@agent_hermes:example.org",
+              "homeserver_url": "matrix.example.org",
+              "device": {
+                "device_id": "SUPERDIAL",
+                "access_token": "syt_example_token"
+              },
+              "voice": "af_heart",
+              "stt_language": "en"
+            }
+          },
+          {
+            "why": "an agent that is not a Matrix user id",
+            "body": {
+              "agent_user_id": "agent_hermes",
+              "homeserver_url": "https://matrix.example.org",
+              "device": {
+                "device_id": "SUPERDIAL",
+                "access_token": "syt_example_token"
+              },
+              "voice": "af_heart",
+              "stt_language": "en"
+            }
+          }
+        ]
+      }
+    },
+    "replySuperdialTurn": {
+      "request": {
+        "valid": {
+          "v1: the whole reply in one final message": {
+            "seq": 0,
+            "text": "The build is green.",
+            "final": true,
+            "outcome": "ok"
+          },
+          "the turn was cancelled": {
+            "seq": 0,
+            "text": "",
+            "final": true,
+            "outcome": "cancelled"
+          },
+          "the turn failed": {
+            "seq": 0,
+            "text": "",
+            "final": true,
+            "outcome": "error"
+          },
+          "a later, non-final message (streaming, not sent in v1)": {
+            "seq": 1,
+            "text": "The build",
+            "final": false,
+            "outcome": "ok"
+          }
+        },
+        "invalid": [
+          {
+            "why": "no seq",
+            "body": {
+              "text": "The build is green.",
+              "final": true,
+              "outcome": "ok"
+            }
+          },
+          {
+            "why": "no final",
+            "body": {
+              "seq": 0,
+              "text": "The build is green.",
+              "outcome": "ok"
+            }
+          },
+          {
+            "why": "no outcome",
+            "body": {
+              "seq": 0,
+              "text": "The build is green.",
+              "final": true
+            }
+          },
+          {
+            "why": "no text",
+            "body": {
+              "seq": 0,
+              "final": true,
+              "outcome": "ok"
+            }
+          },
+          {
+            "why": "an outcome the contract does not name",
+            "body": {
+              "seq": 0,
+              "text": "",
+              "final": true,
+              "outcome": "timeout"
+            }
+          },
+          {
+            "why": "a negative seq",
+            "body": {
+              "seq": -1,
+              "text": "The build is green.",
+              "final": true,
+              "outcome": "ok"
+            }
+          }
+        ]
+      }
+    },
+    "superdialAgentHealth": {
+      "responses": {
+        "200": {
+          "valid": {
+            "in two calls": {
+              "calls": 2
+            },
+            "in none": {
+              "calls": 0
+            }
+          },
+          "invalid": [
+            {
+              "why": "no calls",
+              "body": {}
+            },
+            {
+              "why": "a negative count",
+              "body": {
+                "calls": -1
+              }
+            },
+            {
+              "why": "a count that is not whole",
+              "body": {
+                "calls": 1.5
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
