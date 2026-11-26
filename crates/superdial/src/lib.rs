@@ -8,6 +8,7 @@ pub mod error;
 pub mod homeserver;
 pub mod issuer;
 pub mod keys;
+pub mod media;
 pub mod membership;
 pub mod state;
 
