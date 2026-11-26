@@ -110,6 +110,12 @@ impl CallState {
         diff
     }
 
+    /// Our key could not be sent to `member` (its device keys are not known yet, say): offer it
+    /// in `to_key` again on the next update.
+    pub fn mark_unkeyed(&mut self, member: &CallMember) {
+        self.keyed.remove(member);
+    }
+
     /// A peer key arrived. Returns it if its device is in the call now; otherwise keeps the
     /// latest one per device until that device's membership appears.
     pub fn on_key(&mut self, key: AcceptedKey) -> Option<AcceptedKey> {
@@ -277,6 +283,14 @@ mod tests {
         assert_eq!(d.left, vec![agent()]);
         assert_eq!(d.joined, vec![again.clone()]);
         assert_eq!(d.to_key, vec![again]);
+    }
+
+    #[test]
+    fn unkeyed_member_is_to_key_again() {
+        let mut s = state(None);
+        s.update_members(vec![agent()]);
+        s.mark_unkeyed(&agent());
+        assert_eq!(s.update_members(vec![agent()]).to_key, vec![agent()]);
     }
 
     #[test]
