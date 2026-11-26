@@ -24,6 +24,22 @@ It has no UI and no platform audio code.
 | `crates/superdial` | the library |
 | `crates/superdial-testcaller` | a headless caller for tests: plays a WAV as its microphone, records what it hears, prints the encryption state |
 
+## Using it
+
+The application owns the matrix-sdk `Client` and its sync loop.
+
+```rust
+let (call, mut events) = superdial::Call::new(&client, &room_id, superdial::CallOptions::default())?;
+// Make `call` reachable from the sync loop first: after each sync,
+//   call.handle_to_device(&ev).await for every to-device event, then
+//   call.refresh_members().await
+call.join(None).await?; // None = SuperExchange's token service at the discovered base
+call.capture(&pcm_48k_mono).await?;     // microphone
+// events: CallEvent::Media(MediaEvent::Audio { identity, samples }), E2ee states, members,
+// keys, transcripts
+call.leave().await?;
+```
+
 ## Status
 
 Pre-release. Built against tuwunel 2.0.0 and LiveKit server 1.13. The wire formats are the

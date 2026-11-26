@@ -36,3 +36,12 @@ a machine short of memory, add `-j 6`.
 2.0.0 at `https://staging-rtc.superjackfruit.com`, LiveKit, lk-jwt-service as the dev token
 issuer). It needs two test users whose passwords are in `.local/` (gitignored), and a route to
 LiveKit's media ports (UDP 50100–50200 on the workbench tailnet address). See the script header.
+
+```sh
+cargo build -p superdial-testcaller
+./scripts/integration-rtc-spike.sh             # fresh room; ROOM=!id:server reuses one
+KILL_TEST=1 ./scripts/integration-rtc-spike.sh # also kill -9 a caller and time the delayed leave
+```
+
+Do not invite `@agent_echo` to test rooms: the spike bot still runs there and answers calls.
+Runs write their logs and recordings to `.local/run-*` (gitignored).
