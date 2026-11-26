@@ -37,6 +37,12 @@ pub fn key_provider_options() -> KeyProviderOptions {
     }
 }
 
+/// A per-participant key provider with [`key_provider_options`]. Keys can be set on it before
+/// [`Media::connect`].
+pub fn new_key_provider() -> KeyProvider {
+    KeyProvider::new(key_provider_options())
+}
+
 /// Splits PCM into 10 ms frames, zero-padding the last.
 pub fn ten_ms_frames(samples: &[i16]) -> Vec<Vec<i16>> {
     samples
@@ -127,14 +133,14 @@ pub struct Media {
 }
 
 impl Media {
-    /// Connects with E2EE (AES-GCM, per-participant keys), registers our key under
+    /// Connects with E2EE (AES-GCM, per-participant keys from `keys`), registers our key under
     /// `grant.identity`, publishes a 48 kHz mono microphone track and subscribes to every
     /// remote audio track.
     pub async fn connect(
         grant: &LiveKitGrant,
+        keys: KeyProvider,
         own_key: &CallKey,
     ) -> Result<(Media, mpsc::UnboundedReceiver<MediaEvent>), Error> {
-        let keys = KeyProvider::new(key_provider_options());
         keys.set_key(
             &ParticipantIdentity(grant.identity.clone()),
             0,

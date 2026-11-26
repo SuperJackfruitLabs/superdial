@@ -266,6 +266,13 @@ async fn call(client: Client, a: CallArgs) -> Result<bool> {
             .await;
     });
 
+    // Invites that arrived before the sync loop started (in the first sync).
+    if a.accept_invites {
+        for r in client.invited_rooms() {
+            let ok = r.join().await.is_ok();
+            out(json!({"event": "invite_accepted", "room_id": r.room_id(), "ok": ok}));
+        }
+    }
     // Wait until the room is joined (an invite may need accepting first).
     let t0 = Instant::now();
     while client.get_room(&a.room).map(|r| r.state()) != Some(matrix_sdk::RoomState::Joined) {
@@ -290,13 +297,17 @@ async fn call(client: Client, a: CallArgs) -> Result<bool> {
         transcripts_from: a.transcripts_from.clone(),
         ..CallOptions::default()
     };
-    let (call, mut events) = Call::join(&client, &a.room, issuer, options).await?;
-    let own_identity = call.grant().identity.clone();
+    // Reachable from the sync loop before joining: peers' keys can arrive as soon as our
+    // membership is published.
+    let (call, mut events) = Call::new(&client, &a.room, options)?;
+    *slot.write().await = Some(call.clone());
+    call.join(issuer).await?;
+    let grant = call.grant().context("joined call has a grant")?;
+    let own_identity = grant.identity.clone();
     out(
-        json!({"event": "joined", "identity": own_identity, "livekit_room": call.grant().livekit_room,
+        json!({"event": "joined", "identity": own_identity, "livekit_room": grant.livekit_room,
                "livekit_room_by_hash": superdial::livekit_room_name(a.room.as_str()), "delay_id": call.delay_id()}),
     );
-    *slot.write().await = Some(call.clone());
 
     // Microphone: loop the WAV (or silence) until the call ends.
     let mic = {

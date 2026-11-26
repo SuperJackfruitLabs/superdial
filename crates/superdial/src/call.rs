@@ -3,9 +3,14 @@
 //! loop, and feeds the call with to-device events and membership refreshes.
 
 use std::{
-    sync::{Arc, Mutex as StdMutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex as StdMutex,
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+
+use livekit::{e2ee::key_provider::KeyProvider, prelude::ParticipantIdentity};
 
 use matrix_sdk::{
     deserialized_responses::{ProcessedToDeviceEvent, RawAnySyncOrStrippedState},
@@ -18,7 +23,7 @@ use matrix_sdk::{
 };
 use matrix_sdk_base::crypto::CollectStrategy;
 use serde_json::Value;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, OnceCell};
 
 use crate::{
     contract::{
@@ -29,7 +34,7 @@ use crate::{
     homeserver::{DelayedAction, Homeserver},
     issuer::{DelayedLeaveRequest, LiveKitGrant, SuperExchangeIssuer, TokenIssuer, TokenRequest},
     keys::{key_message, parse_key_event, CallKey, KeyRejection},
-    media::{Media, MediaEvent},
+    media::{new_key_provider, Media, MediaEvent},
     membership::{active_members, CallMember},
     state::{CallState, TranscriptRejection},
     Error,
@@ -153,81 +158,98 @@ pub(crate) async fn negotiate(
     })
 }
 
-struct Inner {
-    client: Client,
-    room_id: OwnedRoomId,
-    user_id: OwnedUserId,
-    device_id: OwnedDeviceId,
+/// What exists once we are in the call.
+struct Joined {
     hs: Homeserver,
     grant: LiveKitGrant,
     service_url: String,
     state_key: String,
     membership_id: String,
     delay_id: String,
-    own_key: CallKey,
-    state: Mutex<CallState>,
     media: Media,
+}
+
+struct Inner {
+    client: Client,
+    room_id: OwnedRoomId,
+    user_id: OwnedUserId,
+    device_id: OwnedDeviceId,
+    options: CallOptions,
+    own_key: CallKey,
+    /// Peer keys go here from the start, so keys that arrive before media connects are kept.
+    keys: KeyProvider,
+    state: Mutex<CallState>,
+    joined: OnceCell<Joined>,
     restart: StdMutex<Option<RestartLoop>>,
+    left: AtomicBool,
     events: mpsc::UnboundedSender<CallEvent>,
 }
 
 /// One device's part in one room's call. Cheap to clone; all clones are the same call.
+///
+/// Create it with [`Call::new`], make it reachable from the sync loop (to-device events can
+/// arrive as soon as our membership is published), then [`Call::join`].
 #[derive(Clone)]
 pub struct Call {
     inner: Arc<Inner>,
 }
 
 impl Call {
-    /// Joins `room_id`'s call. `issuer` defaults to SuperExchange's token service at the
-    /// homeserver's discovered `livekit_service_url`.
-    pub async fn join(
+    /// A call in `room_id` that has not been joined yet. No network.
+    pub fn new(
         client: &Client,
         room_id: &RoomId,
-        issuer: Option<Arc<dyn TokenIssuer>>,
         options: CallOptions,
     ) -> Result<(Call, mpsc::UnboundedReceiver<CallEvent>), Error> {
         let user_id = client.user_id().ok_or(Error::NotLoggedIn)?.to_owned();
         let device_id = client.device_id().ok_or(Error::NotLoggedIn)?.to_owned();
-        if client.get_room(room_id).is_none() {
-            return Err(Error::UnknownRoom(room_id.to_string()));
-        }
-        let hs = Homeserver::from_client(client)?;
-        let n = negotiate(&hs, issuer, room_id, &user_id, &device_id, &options).await?;
-        let own_key = CallKey::generate();
-        let (media, mut media_rx) = match Media::connect(&n.grant, &own_key).await {
-            Ok(m) => m,
-            Err(e) => {
-                n.restart.stop().await;
-                let _ = hs
-                    .clear_membership(room_id.as_str(), &n.state_key, Some(&n.delay_id))
-                    .await;
-                return Err(e);
-            }
-        };
         let (tx, rx) = mpsc::unbounded_channel();
         let state = CallState::new(
             room_id.to_owned(),
             user_id.clone(),
             device_id.clone(),
-            options.transcripts_from,
+            options.transcripts_from.clone(),
         );
         let inner = Arc::new(Inner {
             client: client.clone(),
             room_id: room_id.to_owned(),
             user_id,
             device_id,
-            hs,
-            grant: n.grant,
-            service_url: n.service_url,
-            state_key: n.state_key,
-            membership_id: n.membership_id,
-            delay_id: n.delay_id,
-            own_key,
+            options,
+            own_key: CallKey::generate(),
+            keys: new_key_provider(),
             state: Mutex::new(state),
-            media,
-            restart: StdMutex::new(Some(n.restart)),
-            events: tx.clone(),
+            joined: OnceCell::new(),
+            restart: StdMutex::new(None),
+            left: AtomicBool::new(false),
+            events: tx,
         });
+        Ok((Call { inner }, rx))
+    }
+
+    /// Joins the call. `issuer` defaults to SuperExchange's token service at the homeserver's
+    /// discovered `livekit_service_url`. Joining twice is an error.
+    pub async fn join(&self, issuer: Option<Arc<dyn TokenIssuer>>) -> Result<(), Error> {
+        let i = &self.inner;
+        if i.joined.initialized() {
+            return Err(Error::Matrix("already joined".into()));
+        }
+        if i.client.get_room(&i.room_id).is_none() {
+            return Err(Error::UnknownRoom(i.room_id.to_string()));
+        }
+        let hs = Homeserver::from_client(&i.client)?;
+        let n = negotiate(&hs, issuer, &i.room_id, &i.user_id, &i.device_id, &i.options).await?;
+        let (media, mut media_rx) = match Media::connect(&n.grant, i.keys.clone(), &i.own_key).await {
+            Ok(m) => m,
+            Err(e) => {
+                n.restart.stop().await;
+                let _ = hs
+                    .clear_membership(i.room_id.as_str(), &n.state_key, Some(&n.delay_id))
+                    .await;
+                return Err(e);
+            }
+        };
+        let tx = i.events.clone();
         tokio::spawn(async move {
             while let Some(ev) = media_rx.recv().await {
                 if tx.send(CallEvent::Media(ev)).is_err() {
@@ -235,33 +257,51 @@ impl Call {
                 }
             }
         });
-        let call = Call { inner };
-        call.refresh_members().await?;
-        Ok((call, rx))
+        *i.restart.lock().expect("restart lock") = Some(n.restart);
+        let joined = Joined {
+            hs,
+            grant: n.grant,
+            service_url: n.service_url,
+            state_key: n.state_key,
+            membership_id: n.membership_id,
+            delay_id: n.delay_id,
+            media,
+        };
+        if i.joined.set(joined).is_err() {
+            return Err(Error::Matrix("joined concurrently".into()));
+        }
+        self.refresh_members().await
+    }
+
+    fn joined(&self) -> Option<&Joined> {
+        self.inner.joined.get()
     }
 
     pub fn room_id(&self) -> &RoomId {
         &self.inner.room_id
     }
 
-    pub fn grant(&self) -> &LiveKitGrant {
-        &self.inner.grant
+    /// The LiveKit grant, once joined.
+    pub fn grant(&self) -> Option<&LiveKitGrant> {
+        self.joined().map(|j| &j.grant)
     }
 
-    pub fn media(&self) -> &Media {
-        &self.inner.media
+    /// The LiveKit connection, once joined.
+    pub fn media(&self) -> Option<&Media> {
+        self.joined().map(|j| &j.media)
     }
 
-    pub fn delay_id(&self) -> &str {
-        &self.inner.delay_id
+    /// The delayed leave's ID, once joined.
+    pub fn delay_id(&self) -> Option<&str> {
+        self.joined().map(|j| j.delay_id.as_str())
     }
 
-    pub fn membership_id(&self) -> &str {
-        &self.inner.membership_id
+    pub fn membership_id(&self) -> Option<&str> {
+        self.joined().map(|j| j.membership_id.as_str())
     }
 
-    pub fn livekit_service_url(&self) -> &str {
-        &self.inner.service_url
+    pub fn livekit_service_url(&self) -> Option<&str> {
+        self.joined().map(|j| j.service_url.as_str())
     }
 
     /// The other participants' devices, as last refreshed.
@@ -274,14 +314,13 @@ impl Call {
     }
 
     /// Re-reads the room's call memberships from the client's store (call it after each sync):
-    /// reports joins and leaves, sends our key to new members, registers keys that were waiting
-    /// for their sender's membership.
+    /// reports joins and leaves, registers keys that were waiting for their sender's
+    /// membership, and, once we are in the call, sends our key to new members.
     pub async fn refresh_members(&self) -> Result<(), Error> {
         let i = &self.inner;
-        let room = i
-            .client
-            .get_room(&i.room_id)
-            .ok_or_else(|| Error::UnknownRoom(i.room_id.to_string()))?;
+        let Some(room) = i.client.get_room(&i.room_id) else {
+            return Ok(());
+        };
         let raw = room
             .get_state_events(StateEventType::from(CALL_MEMBER_EVENT))
             .await
@@ -305,6 +344,13 @@ impl Call {
                 active.push(m);
             }
         }
+        self.apply_members(active).await;
+        Ok(())
+    }
+
+    pub(crate) async fn apply_members(&self, active: Vec<CallMember>) {
+        let i = &self.inner;
+        let in_call = i.joined.get().is_some() && !i.left.load(Ordering::SeqCst);
         let diff = i.state.lock().await.update_members(active);
         for m in diff.left {
             self.emit(CallEvent::MemberLeft(m));
@@ -313,29 +359,50 @@ impl Call {
             self.emit(CallEvent::MemberJoined(m));
         }
         for k in diff.keys_to_apply {
-            i.media.set_participant_key(&k.identity, k.index, &k.key);
-            self.emit(CallEvent::KeyRegistered { identity: k.identity });
+            self.register_key(&k.identity, k.index, &k.key);
         }
         for m in diff.to_key {
-            let content = key_message(
-                i.room_id.as_str(),
-                i.user_id.as_str(),
-                i.device_id.as_str(),
-                &i.membership_id,
-                0,
-                &i.own_key,
-                now_ms(),
-            );
-            let value = serde_json::to_value(content).map_err(|e| Error::Malformed(e.to_string()))?;
-            match self.send_to_device(&m, KEYS_EVENT, &value).await {
+            let sent = match i.joined.get() {
+                Some(j) if in_call => self.send_own_key(&m, &j.membership_id).await,
+                _ => Err(Error::Matrix("not in the call yet".into())),
+            };
+            match sent {
                 Ok(()) => self.emit(CallEvent::KeySent { to: m }),
                 Err(e) => {
-                    tracing::warn!(to = %m.identity(), "could not send our call key yet: {e}");
+                    if in_call {
+                        tracing::warn!(to = %m.identity(), "could not send our call key yet: {e}");
+                    }
                     i.state.lock().await.mark_unkeyed(&m);
                 }
             }
         }
-        Ok(())
+    }
+
+    fn register_key(&self, identity: &str, index: u32, key: &CallKey) {
+        let index = i32::try_from(index).unwrap_or(i32::MAX);
+        self.inner.keys.set_key(
+            &ParticipantIdentity(identity.to_owned()),
+            index,
+            key.as_bytes().to_vec(),
+        );
+        self.emit(CallEvent::KeyRegistered {
+            identity: identity.to_owned(),
+        });
+    }
+
+    async fn send_own_key(&self, to: &CallMember, membership_id: &str) -> Result<(), Error> {
+        let i = &self.inner;
+        let content = key_message(
+            i.room_id.as_str(),
+            i.user_id.as_str(),
+            i.device_id.as_str(),
+            membership_id,
+            0,
+            &i.own_key,
+            now_ms(),
+        );
+        let value = serde_json::to_value(content).map_err(|e| Error::Malformed(e.to_string()))?;
+        self.send_to_device(to, KEYS_EVENT, &value).await
     }
 
     async fn send_to_device(&self, to: &CallMember, event_type: &str, content: &Value) -> Result<(), Error> {
@@ -370,7 +437,8 @@ impl Call {
     }
 
     /// Takes one to-device event from sync. C1 keys and C2 transcripts for this room are
-    /// handled; cleartext ones are ignored, and everything else is left alone.
+    /// handled; cleartext ones are ignored, and everything else is left alone. Works before
+    /// [`Call::join`] returns.
     pub async fn handle_to_device(&self, ev: &ProcessedToDeviceEvent) {
         let (raw, sender) = match ev {
             ProcessedToDeviceEvent::Decrypted { raw, encryption_info } => (
@@ -402,9 +470,9 @@ impl Call {
         if ty == KEYS_EVENT {
             match parse_key_event(content, &self.inner.room_id, &sender, &sender_device) {
                 Ok(k) => {
-                    if let Some(k) = self.inner.state.lock().await.on_key(k) {
-                        self.inner.media.set_participant_key(&k.identity, k.index, &k.key);
-                        self.emit(CallEvent::KeyRegistered { identity: k.identity });
+                    let now = self.inner.state.lock().await.on_key(k);
+                    if let Some(k) = now {
+                        self.register_key(&k.identity, k.index, &k.key);
                     }
                 }
                 Err(e) => self.emit(CallEvent::KeyIgnored { reason: e.to_string() }),
@@ -439,18 +507,25 @@ impl Call {
 
     /// Sends 48 kHz mono PCM as our microphone.
     pub async fn capture(&self, samples: &[i16]) -> Result<(), Error> {
-        self.inner.media.capture(samples).await
+        match self.media() {
+            Some(m) => m.capture(samples).await,
+            None => Err(Error::LiveKit("not connected".into())),
+        }
     }
 
     /// Leaves: stops the restart loop, closes media and clears our membership (sending the
     /// delayed leave now, or publishing the empty membership). Safe to call more than once.
     pub async fn leave(&self) -> Result<(), Error> {
+        if self.inner.left.swap(true, Ordering::SeqCst) {
+            return Ok(());
+        }
         let restart = self.inner.restart.lock().expect("restart lock").take();
-        let Some(restart) = restart else { return Ok(()) };
-        restart.stop().await;
-        self.inner.media.close().await;
-        let i = &self.inner;
-        i.hs.clear_membership(i.room_id.as_str(), &i.state_key, Some(&i.delay_id))
+        if let Some(r) = restart {
+            r.stop().await;
+        }
+        let Some(j) = self.joined() else { return Ok(()) };
+        j.media.close().await;
+        j.hs.clear_membership(self.inner.room_id.as_str(), &j.state_key, Some(&j.delay_id))
             .await
     }
 }
@@ -650,18 +725,101 @@ mod tests {
         assert!(puts(&server).await.is_empty());
     }
 
+    async fn logged_in_client(server: &MockServer) -> Client {
+        use matrix_sdk::{
+            authentication::matrix::MatrixSession,
+            ruma::{owned_device_id, owned_user_id},
+            SessionMeta, SessionTokens,
+        };
+        let client = Client::builder().homeserver_url(server.uri()).build().await.unwrap();
+        client
+            .restore_session(MatrixSession {
+                meta: SessionMeta {
+                    user_id: owned_user_id!("@u:s"),
+                    device_id: owned_device_id!("DEV"),
+                },
+                tokens: SessionTokens {
+                    access_token: "tok".into(),
+                    refresh_token: None,
+                },
+            })
+            .await
+            .unwrap();
+        client
+    }
+
+    fn decrypted_key_event(sender: &str, device: &str, key: &CallKey) -> ProcessedToDeviceEvent {
+        use matrix_sdk::deserialized_responses::{AlgorithmInfo, EncryptionInfo, VerificationLevel, VerificationState};
+        let content = key_message("!r:s", sender, device, "m-peer", 0, key, 1);
+        let raw = Raw::new(&json!({"type": KEYS_EVENT, "sender": sender, "content": content}))
+            .unwrap()
+            .cast_unchecked();
+        ProcessedToDeviceEvent::Decrypted {
+            raw,
+            encryption_info: EncryptionInfo {
+                sender: sender.try_into().unwrap(),
+                sender_device: Some(device.into()),
+                forwarder: None,
+                algorithm_info: AlgorithmInfo::OlmV1Curve25519AesSha2 {
+                    curve25519_public_key_base64: "k".into(),
+                },
+                verification_state: VerificationState::Unverified(VerificationLevel::UnsignedDevice),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn key_received_before_join_is_registered_and_peer_keyed_after_join() {
+        // A peer's key can arrive between our membership being published and join() returning,
+        // so a call must take to-device events from the moment it exists.
+        let server = MockServer::start().await;
+        let client = logged_in_client(&server).await;
+        let room: OwnedRoomId = "!r:s".try_into().unwrap();
+        let (call, mut rx) = Call::new(&client, &room, CallOptions::default()).unwrap();
+        let key = CallKey::generate();
+        call.handle_to_device(&decrypted_key_event("@peer:s", "PEER", &key))
+            .await;
+        let peer = CallMember {
+            user_id: "@peer:s".try_into().unwrap(),
+            device_id: "PEER".into(),
+            membership_id: "m-peer".into(),
+        };
+        call.apply_members(vec![peer.clone()]).await;
+        assert_eq!(
+            call.inner
+                .keys
+                .get_key(&livekit::prelude::ParticipantIdentity("@peer:s:PEER".into()), 0),
+            Some(key.as_bytes().to_vec())
+        );
+        let mut seen = vec![];
+        while let Ok(ev) = rx.try_recv() {
+            seen.push(ev);
+        }
+        assert!(seen.contains(&CallEvent::MemberJoined(peer.clone())));
+        assert!(seen.contains(&CallEvent::KeyRegistered {
+            identity: "@peer:s:PEER".into()
+        }));
+        assert!(
+            !seen.iter().any(|e| matches!(e, CallEvent::KeySent { .. })),
+            "no key sent before we are in the call"
+        );
+        // Not joined yet, so the peer is still owed our key.
+        assert_eq!(
+            call.inner.state.lock().await.update_members(vec![peer.clone()]).to_key,
+            vec![peer]
+        );
+    }
+
     fn assert_send<T: Send>(_: T) {}
 
     #[tokio::test]
     async fn call_futures_are_send() {
         // superdial-agent and SuperMessage spawn these on multi-threaded runtimes.
-        let client = Client::builder()
-            .homeserver_url("http://127.0.0.1:9")
-            .build()
-            .await
-            .unwrap();
+        let server = MockServer::start().await;
+        let client = logged_in_client(&server).await;
         let room: OwnedRoomId = "!r:s".try_into().unwrap();
-        assert_send(Call::join(&client, &room, None, CallOptions::default()));
+        let (call, _rx) = Call::new(&client, &room, CallOptions::default()).unwrap_or_else(|_| unreachable!());
+        assert_send(call.join(None));
     }
 
     #[test]
