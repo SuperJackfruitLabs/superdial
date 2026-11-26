@@ -1,0 +1,33 @@
+[package]
+name = "superdial"
+description = "MatrixRTC voice calls over LiveKit with end-to-end encryption: membership, keys, tokens, media."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+# Development-only token issuer for the rtc-spike's lk-jwt-service (`POST /sfu/get`). Never a shipped default.
+dev-lk-jwt = []
+
+[dependencies]
+matrix-sdk.workspace = true
+matrix-sdk-base.workspace = true
+livekit.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+rand.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+wiremock.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

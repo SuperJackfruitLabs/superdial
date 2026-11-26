@@ -1,0 +1,22 @@
+[package]
+name = "superdial-testcaller"
+description = "Headless MatrixRTC test caller built on superdial."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+superdial = { path = "../superdial", features = ["dev-lk-jwt"] }
+matrix-sdk.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+hound.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+rustls.workspace = true
+uuid.workspace = true
+futures.workspace = true

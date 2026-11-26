@@ -1,0 +1,4 @@
+{"room_id": "!r:s", "member_id": "@u:s:DEV",
+ "member": {"user_id": "@u:s", "device_id": "DEV"},
+ "keys": {"index": 0, "key": "AAECAwQFBgcICQoLDA0ODw"},
+ "sent_ts": 1764200000000}

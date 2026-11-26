@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = ["crates/superdial", "crates/superdial-testcaller"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+rust-version = "1.85"
+
+[workspace.dependencies]
+matrix-sdk = { version = "=0.19.1", features = ["e2e-encryption", "sqlite", "bundled-sqlite", "experimental-send-custom-to-device"] }
+matrix-sdk-base = { version = "=0.19.1", features = ["e2e-encryption"] }
+livekit = { version = "=0.12.0", features = ["rustls-tls-webpki-roots"] }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+rand = "0.8"
+sha2 = "0.10"
+thiserror = "2"
+async-trait = "0.1"
+futures = "0.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+hound = "3"
+wiremock = "0.6"
