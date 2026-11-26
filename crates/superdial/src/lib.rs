@@ -3,6 +3,11 @@
 //! The library holds the call protocol only: no UI and no platform audio code.
 
 pub mod contract;
+pub mod error;
+pub mod homeserver;
+pub mod issuer;
 pub mod keys;
 pub mod membership;
 pub mod state;
+
+pub use error::Error;
