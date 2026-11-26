@@ -8,5 +8,7 @@
 
 pub mod audio;
 pub mod config;
+pub mod hub;
+pub mod speech;
 pub mod textprep;
 pub mod turns;
