@@ -5,3 +5,4 @@
 pub mod contract;
 pub mod keys;
 pub mod membership;
+pub mod state;
