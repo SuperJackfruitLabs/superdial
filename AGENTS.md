@@ -1,7 +1,8 @@
 # superdial: agent guide
 
 Rust Cargo workspace. `crates/superdial` is the library; `crates/superdial-testcaller` is a
-headless caller used for integration tests.
+headless caller used for integration tests; `crates/superdial-agent` is the agent's side of a
+call, served to the AgentPod hub over C6 and shipped as the image in `Dockerfile`.
 
 ## Rules
 
@@ -14,6 +15,10 @@ headless caller used for integration tests.
 - The library has no UI and no platform audio code. Audio crosses its boundary as 48 kHz mono
   i16 PCM.
 - Binaries must install a rustls provider: `rustls::crypto::ring::default_provider().install_default()`.
+- superdial-agent holds only call-device tokens, its C6 secret and its own speech key, never
+  the hub's appservice token. It never asks for room timelines and deletes room keys it is sent.
+  Its turn logic lives in `conversation.rs` behind `CallIo`, tested with fakes; keep it there.
+- Never log tokens. Transcript and reply text only behind `SUPERDIAL_AGENT_LOG_TEXT`.
 - Keep wire decisions in the pure modules (`contract`, `keys`, `membership`, `state`) with unit
   tests; keep I/O behind `Homeserver`, `TokenIssuer`, `DelayedEvents` and `Media`.
 
@@ -42,6 +47,17 @@ cargo build -p superdial-testcaller
 ./scripts/integration-rtc-spike.sh             # fresh room; ROOM=!id:server reuses one
 KILL_TEST=1 ./scripts/integration-rtc-spike.sh # also kill -9 a caller and time the delayed leave
 ```
+
+`scripts/integration-agent-rtc-spike.sh` runs superdial-agent (built with
+`--features superdial-agent/dev-lk-jwt`) against a fake hub (`scripts/fake_hub.py`) and a test
+caller: a spoken question, the reply heard back, and the cancel on hang-up and on DELETE. It
+uses `sdtest_b` as the stand-in agent with a second password-login device
+(`.local/agent_device.json`), and speech services keyed with `.local/speech_key`; by default
+local copies of agentpod's transcriber and speech servers on ports 18840 and 18841
+(`.local/speech-standin/run.sh`). The dev issuer's tokens cannot set participant attributes, so
+the caller does not see `superdial.state` there; the agent's log shows the states it set.
+
+Do not build the image on workbench. `docker build --check .` lints the Dockerfile.
 
 Do not invite `@agent_echo` to test rooms: the spike bot still runs there and answers calls.
 Runs write their logs and recordings to `.local/run-*` (gitignored).

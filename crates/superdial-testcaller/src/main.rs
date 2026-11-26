@@ -84,6 +84,11 @@ enum Command {
         /// WAV played (looped) as the microphone; silence if absent.
         #[arg(long)]
         play: Option<PathBuf>,
+        /// Play the WAV once, --play-delay seconds after a peer's key arrives, then silence.
+        #[arg(long)]
+        play_once: bool,
+        #[arg(long, default_value_t = 3.0)]
+        play_delay: f64,
         /// Where to write what the peer said (48 kHz mono).
         #[arg(long)]
         record: Option<PathBuf>,
@@ -141,6 +146,8 @@ async fn main() -> Result<()> {
             issuer,
             issuer_url,
             play,
+            play_once,
+            play_delay,
             record,
             seconds,
             accept_invites,
@@ -152,6 +159,8 @@ async fn main() -> Result<()> {
                 issuer,
                 issuer_url,
                 play,
+                play_once,
+                play_delay,
                 record,
                 seconds,
                 accept_invites,
@@ -213,6 +222,8 @@ struct CallArgs {
     issuer: IssuerKind,
     issuer_url: Option<String>,
     play: Option<PathBuf>,
+    play_once: bool,
+    play_delay: f64,
     record: Option<PathBuf>,
     seconds: u64,
     accept_invites: bool,
@@ -309,16 +320,39 @@ async fn call(client: Client, a: CallArgs) -> Result<bool> {
                "livekit_room_by_hash": superdial::livekit_room_name(a.room.as_str()), "delay_id": call.delay_id()}),
     );
 
-    // Microphone: loop the WAV (or silence) until the call ends.
+    // Microphone: loop the WAV (or silence) until the call ends; or, with --play-once, silence
+    // until a peer's key has arrived and --play-delay has passed, the WAV once, then silence.
+    let (peer_keyed_tx, mut peer_keyed) = tokio::sync::watch::channel(false);
     let mic = {
         let samples = match &a.play {
             Some(p) => wav::read_mono_48k(p)?,
             None => vec![0; 48_000],
         };
-        let call = call.clone();
+        let (call, once, delay) = (call.clone(), a.play_once, Duration::from_secs_f64(a.play_delay));
         tokio::spawn(async move {
-            loop {
+            let quiet = vec![0i16; 4_800];
+            if once {
+                while !*peer_keyed.borrow_and_update() {
+                    if call.capture(&quiet).await.is_err() {
+                        return;
+                    }
+                }
+                let until = tokio::time::Instant::now() + delay;
+                while tokio::time::Instant::now() < until {
+                    if call.capture(&quiet).await.is_err() {
+                        return;
+                    }
+                }
+                out(json!({"event": "playing", "ms": samples.len() / 48}));
                 if let Err(e) = call.capture(&samples).await {
+                    tracing::warn!("capture: {e}");
+                    return;
+                }
+                out(json!({"event": "played"}));
+            }
+            loop {
+                let chunk = if once { &quiet } else { &samples };
+                if let Err(e) = call.capture(chunk).await {
                     tracing::warn!("capture: {e}");
                     break;
                 }
@@ -373,7 +407,15 @@ async fn call(client: Client, a: CallArgs) -> Result<bool> {
                     }
                     CallEvent::MemberLeft(m) => out(json!({"event": "member_left", "identity": m.identity()})),
                     CallEvent::KeySent { to } => out(json!({"event": "key_sent", "to": to.identity()})),
-                    CallEvent::KeyRegistered { identity } => out(json!({"event": "key_registered", "identity": identity})),
+                    CallEvent::KeyRegistered { identity } => {
+                        if identity != own_identity {
+                            let _ = peer_keyed_tx.send(true);
+                        }
+                        out(json!({"event": "key_registered", "identity": identity}))
+                    }
+                    CallEvent::Media(MediaEvent::AttributesChanged { identity, attributes }) => {
+                        out(json!({"event": "attributes", "identity": identity, "attributes": attributes}))
+                    }
                     CallEvent::KeyIgnored { reason } => out(json!({"event": "key_ignored", "reason": reason})),
                     CallEvent::Transcript { from, content } => {
                         out(json!({"event": "transcript_received", "from": from.identity(), "text": content.text, "turn_id": content.turn_id}));

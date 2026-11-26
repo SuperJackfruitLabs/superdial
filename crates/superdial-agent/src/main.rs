@@ -12,9 +12,13 @@ use superdial_agent::{
 };
 use tracing_subscriber::EnvFilter;
 
-/// Library noise kept down; none of these log secrets at warn.
-const DEFAULT_LOG: &str = "info,matrix_sdk=warn,matrix_sdk_base=warn,matrix_sdk_crypto=warn,matrix_sdk_sqlite=warn,\
-                           matrix_sdk_common=warn,livekit=warn,libwebrtc=warn,livekit_api=warn,hyper=warn,reqwest=warn";
+/// Library noise kept down; none of these log secrets at warn. libwebrtc warns about every
+/// ICE candidate it skips, and matrix-sdk-crypto about the missing key backup on every room
+/// key the call device is sent (and then discards).
+const DEFAULT_LOG: &str =
+    "info,matrix_sdk=warn,matrix_sdk_base=warn,matrix_sdk_crypto=warn,matrix_sdk_crypto::backups=error,\
+                           matrix_sdk_sqlite=warn,matrix_sdk_common=warn,livekit=warn,libwebrtc=error,livekit_api=warn,\
+                           hyper=warn,reqwest=warn";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

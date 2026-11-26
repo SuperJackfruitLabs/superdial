@@ -218,6 +218,14 @@ async fn sync_loop(
                 fresh = false;
                 failures = 0;
                 let timeline_events: usize = resp.rooms.joined.values().map(|r| r.timeline.events.len()).sum();
+                // Event types only (never content), to show the filter holds.
+                let timeline_types: Vec<String> = resp
+                    .rooms
+                    .joined
+                    .values()
+                    .flat_map(|r| r.timeline.events.iter())
+                    .filter_map(|e| e.raw().get_field::<String>("type").ok().flatten())
+                    .collect();
                 let to_device = resp.to_device.len();
                 let calls: Vec<Call> = calls.read().await.values().cloned().collect();
                 for call in &calls {
@@ -237,7 +245,7 @@ async fn sync_loop(
                         Err(e) => tracing::warn!(user = %who, "discarding room keys: {e}"),
                     }
                 }
-                tracing::debug!(user = %who, to_device, timeline_events, "synced");
+                tracing::debug!(user = %who, to_device, timeline_events, ?timeline_types, "synced");
             }
             Err(e) => {
                 failures += 1;
