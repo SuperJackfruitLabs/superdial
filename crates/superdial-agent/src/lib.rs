@@ -6,5 +6,7 @@
 //! the reply the hub hands back ([`textprep`], [`speech`]). It never reads room timelines and
 //! discards room keys ([`session`]).
 
+pub mod audio;
 pub mod config;
 pub mod textprep;
+pub mod turns;
