@@ -1,0 +1,40 @@
+[package]
+name = "superdial-agent"
+description = "The agent side of a superdial call: joins MatrixRTC calls as a bridge agent's call device, hears turns, speaks replies."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+default = []
+# Development only: use the rtc-spike's lk-jwt-service when SUPERDIAL_AGENT_DEV_LK_JWT_URL is set.
+dev-lk-jwt = ["superdial/dev-lk-jwt"]
+
+[dependencies]
+superdial = { path = "../superdial" }
+matrix-sdk.workspace = true
+tokio.workspace = true
+reqwest = { workspace = true, features = ["multipart"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["json"] }
+uuid.workspace = true
+rustls.workspace = true
+anyhow.workspace = true
+hound.workspace = true
+axum.workspace = true
+regex.workspace = true
+rusqlite.workspace = true
+
+[dev-dependencies]
+wiremock.workspace = true
+tower.workspace = true
+http-body-util.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

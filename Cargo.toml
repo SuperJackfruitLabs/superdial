@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/superdial", "crates/superdial-testcaller"]
+members = ["crates/superdial", "crates/superdial-testcaller", "crates/superdial-agent"]
 
 [workspace.package]
 version = "0.1.0"
@@ -30,3 +30,10 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 hound = "3"
 wiremock = "0.6"
+axum = "0.8"
+regex = "1"
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+tempfile = "3"
+# The version matrix-sdk-sqlite 0.19.1 links (one bundled libsqlite3 per build).
+rusqlite = "=0.40.2"
