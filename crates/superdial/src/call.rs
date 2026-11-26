@@ -650,6 +650,20 @@ mod tests {
         assert!(puts(&server).await.is_empty());
     }
 
+    fn assert_send<T: Send>(_: T) {}
+
+    #[tokio::test]
+    async fn call_futures_are_send() {
+        // superdial-agent and SuperMessage spawn these on multi-threaded runtimes.
+        let client = Client::builder()
+            .homeserver_url("http://127.0.0.1:9")
+            .build()
+            .await
+            .unwrap();
+        let room: OwnedRoomId = "!r:s".try_into().unwrap();
+        assert_send(Call::join(&client, &room, None, CallOptions::default()));
+    }
+
     #[test]
     fn default_options() {
         let o = CallOptions::default();
