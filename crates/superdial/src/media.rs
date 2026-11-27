@@ -98,8 +98,13 @@ impl From<EncryptionState> for E2eeState {
 /// What happens on the LiveKit side.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MediaEvent {
+    /// A remote participant joined, with the attributes it had at that moment. Also sent at
+    /// connect for each participant already in the room. When `attributes` is not empty it is
+    /// followed by an [`MediaEvent::AttributesChanged`] with the same attributes, so a reader of
+    /// changes alone sees state set before it saw the participant (`superdial.state`).
     ParticipantConnected {
         identity: String,
+        attributes: HashMap<String, String>,
     },
     ParticipantLeft {
         identity: String,
@@ -172,6 +177,18 @@ impl Media {
             .map_err(|e| Error::LiveKit(e.to_string()))?;
 
         let (tx, rx) = mpsc::unbounded_channel();
+        // LiveKit reports no connect for the participants already in the room when we join.
+        let mut present: Vec<_> = room
+            .remote_participants()
+            .into_values()
+            .map(|p| (p.identity().to_string(), p.attributes()))
+            .collect();
+        present.sort_by(|a, b| a.0.cmp(&b.0));
+        for (identity, attributes) in present {
+            for ev in arrival_events(identity, attributes) {
+                let _ = tx.send(ev);
+            }
+        }
         let forwarder = tokio::spawn(forward_events(events, tx));
         let identity = room.local_participant().identity().to_string();
         Ok((
@@ -242,6 +259,20 @@ impl Media {
     }
 }
 
+/// What a participant's arrival says: it connected, with its attributes then, and those
+/// attributes again as a change when there are any. LiveKit sends no attribute change for
+/// attributes a participant already had when it arrived.
+fn arrival_events(identity: String, attributes: HashMap<String, String>) -> Vec<MediaEvent> {
+    let mut out = vec![MediaEvent::ParticipantConnected {
+        identity: identity.clone(),
+        attributes: attributes.clone(),
+    }];
+    if !attributes.is_empty() {
+        out.push(MediaEvent::AttributesChanged { identity, attributes });
+    }
+    out
+}
+
 async fn forward_events(mut events: mpsc::UnboundedReceiver<RoomEvent>, tx: mpsc::UnboundedSender<MediaEvent>) {
     let mut readers: Vec<JoinHandle<()>> = Vec::new();
     while let Some(ev) = events.recv().await {
@@ -255,9 +286,15 @@ async fn forward_events(mut events: mpsc::UnboundedReceiver<RoomEvent>, tx: mpsc
                 readers.push(tokio::spawn(read_audio(track, identity, tx.clone())));
                 continue;
             }
-            RoomEvent::ParticipantConnected(p) => MediaEvent::ParticipantConnected {
-                identity: p.identity().to_string(),
-            },
+            RoomEvent::ParticipantConnected(p) => {
+                if arrival_events(p.identity().to_string(), p.attributes())
+                    .into_iter()
+                    .any(|ev| tx.send(ev).is_err())
+                {
+                    break;
+                }
+                continue;
+            }
             RoomEvent::ParticipantDisconnected(p) => MediaEvent::ParticipantLeft {
                 identity: p.identity().to_string(),
             },
@@ -337,6 +374,42 @@ mod tests {
         assert_eq!(E2eeState::from(Lk::MissingKey), E2eeState::MissingKey);
         assert_eq!(E2eeState::from(Lk::KeyRatcheted), E2eeState::KeyRatcheted);
         assert_eq!(E2eeState::from(Lk::InternalError), E2eeState::InternalError);
+    }
+
+    fn attrs(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect()
+    }
+
+    /// E1 (2026-11-27): the agent set `superdial.state` = `connecting` before the caller saw it
+    /// connect, and LiveKit sends no attribute change for state a participant already had, so the
+    /// caller never saw it. An arrival carries its attributes, and says them again as a change.
+    #[test]
+    fn an_arrival_carries_its_attributes_and_reports_them_as_a_change() {
+        let state = attrs(&[("superdial.state", "connecting")]);
+        assert_eq!(
+            arrival_events("@agent_x:s:SUPERDIAL".into(), state.clone()),
+            vec![
+                MediaEvent::ParticipantConnected {
+                    identity: "@agent_x:s:SUPERDIAL".into(),
+                    attributes: state.clone(),
+                },
+                MediaEvent::AttributesChanged {
+                    identity: "@agent_x:s:SUPERDIAL".into(),
+                    attributes: state,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn an_arrival_without_attributes_is_only_a_connect() {
+        assert_eq!(
+            arrival_events("@u:s:DEV".into(), HashMap::new()),
+            vec![MediaEvent::ParticipantConnected {
+                identity: "@u:s:DEV".into(),
+                attributes: HashMap::new(),
+            }]
+        );
     }
 
     #[test]

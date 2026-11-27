@@ -413,6 +413,11 @@ async fn call(client: Client, a: CallArgs) -> Result<bool> {
                         }
                         out(json!({"event": "key_registered", "identity": identity}))
                     }
+                    // Its attributes at connect, `superdial.state` included; the library sends
+                    // them again as an `attributes` change right after.
+                    CallEvent::Media(MediaEvent::ParticipantConnected { identity, attributes }) => {
+                        out(json!({"event": "participant_connected", "identity": identity, "attributes": attributes}))
+                    }
                     CallEvent::Media(MediaEvent::AttributesChanged { identity, attributes }) => {
                         out(json!({"event": "attributes", "identity": identity, "attributes": attributes}))
                     }
