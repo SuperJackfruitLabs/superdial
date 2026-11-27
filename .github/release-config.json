@@ -1,0 +1,5 @@
+{
+  "product": "superdial",
+  "ci_workflow": "ci.yml",
+  "artifact": "superdial-agent-{attempt}"
+}
