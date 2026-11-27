@@ -17,6 +17,28 @@ superdial is the call code shared by SuperMessage's core (the person calling) an
 
 It has no UI and no platform audio code.
 
+superdial is part of [Super Jackfruit Labs](https://github.com/SuperJackfruitLabs)' suite: the
+calls run between SuperMessage, the AgentPod hub and SuperExchange, whose sides of them live in
+those repositories.
+
+## Contracts
+
+The wire formats are fixed contracts, kept as schemas and fixtures in
+[treaty](https://github.com/SuperJackfruitLabs/treaty). They are proposed there and not yet in a
+treaty release; until they are, the copies under `crates/*/tests/fixtures/` are what the tests
+read.
+
+| Contract | What | treaty |
+| --- | --- | --- |
+| C1 | call key, to-device `dev.superdial.call.encryption_keys` | `schemas/matrix/dev.superdial.call.encryption_keys.json` |
+| C2 | transcript, to-device `dev.superdial.call.transcript` | `schemas/matrix/dev.superdial.call.transcript.json` |
+| C3 | spoken-turn marker `dev.superdial.spoken` on the person's message | `schemas/matrix/dev.superdial.spoken.json` |
+| C4 | the AgentPod hub's membership check (SuperExchange calls it) | `schemas/http/agentpod/superdial-membership.v1.openapi.json` |
+| C5 | SuperExchange's LiveKit token service | `schemas/http/superexchange/livekit-token.v1.openapi.json` |
+| C6 | hub ↔ superdial-agent call API | `schemas/http/superdial/agent-calls.v1.openapi.json`, `schemas/http/agentpod/superdial-turns.v1.openapi.json` |
+
+A change to a message type, field or route starts in treaty, never here.
+
 ## Crates
 
 | Crate | What |
@@ -93,7 +115,7 @@ only with `SUPERDIAL_AGENT_LOG_TEXT=1`.
 ```sh
 docker build -t superdial-agent .
 docker run -d --name superdial-agent -p 127.0.0.1:8850:8850 -v superdial-agent:/var/lib/superdial-agent \
-  -e SUPERDIAL_AGENT_TOKEN_FILE=/run/secrets/agent_token -e SUPERDIAL_HUB_URL=http://hub:3000 \
+  -e SUPERDIAL_AGENT_TOKEN_FILE=/run/secrets/agent_token -e SUPERDIAL_HUB_URL=http://hub:3001 \
   -e TRANSCRIBE_URL=http://foundry:8840 -e TRANSCRIBE_API_KEY_FILE=/run/secrets/stt_key \
   -e SPEECH_URL=http://foundry:8841 -e SPEECH_API_KEY_FILE=/run/secrets/speech_key \
   -v /path/to/secrets:/run/secrets:ro superdial-agent
@@ -103,10 +125,28 @@ A call device's store must stay with its device. If the hub deletes and re-mints
 delete its store directory (`devices/<user>~<device>`) too, or the new device never uploads
 its keys.
 
+## Building
+
+Rust 1.85 or later. The `livekit` crate's `webrtc-sys` downloads a prebuilt libwebrtc at build
+time and compiles C++ glue, which needs clang (21 is what CI and the image use; set `CC` and
+`CXX` if the default compiler fails) and, on Linux, the development packages libwebrtc links:
+on Debian or Ubuntu, `pkg-config libssl-dev libglib2.0-dev libva-dev libdrm-dev libx11-dev
+libxext-dev libxfixes-dev libxdamage-dev libxrandr-dev libxcomposite-dev libgbm-dev
+libpulse-dev libasound2-dev`. `.github/workflows/ci.yml` is the reference setup.
+
+```sh
+cargo fmt --all --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+cargo test --features dev-lk-jwt   # also the development token issuer
+```
+
+The integration scripts under `scripts/` need a MatrixRTC stack and test users; see
+[AGENTS.md](AGENTS.md).
+
 ## Status
 
-Pre-release. Built against tuwunel 2.0.0 and LiveKit server 1.13. The wire formats are the
-superdial contracts (C1, C2, C3, C5), to be published as treaty contracts.
+Pre-release. Built against tuwunel 2.0.0 and LiveKit server 1.13.
 
 ## Licence
 

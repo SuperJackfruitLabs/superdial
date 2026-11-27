@@ -1,0 +1,59 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_TERM_COLOR: always
+      # The livekit crate's webrtc-sys downloads a prebuilt libwebrtc and compiles its C++ glue
+      # with clang (21, as in the Dockerfile).
+      CC: clang-21
+      CXX: clang++-21
+      LIBCLANG_PATH: /usr/lib/llvm-21/lib
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System packages (clang 21, and what libwebrtc links)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends wget gnupg pkg-config libssl-dev \
+            libglib2.0-dev libva-dev libdrm-dev libx11-dev libxext-dev libxfixes-dev libxdamage-dev \
+            libxrandr-dev libxcomposite-dev libgbm-dev libpulse-dev libasound2-dev
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-21 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends clang-21 libclang-21-dev lld-21
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: fmt
+        run: cargo fmt --all --check
+
+      - name: clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: clippy (dev-lk-jwt)
+        run: cargo clippy --locked --all-targets --features dev-lk-jwt -- -D warnings
+
+      - name: test
+        run: cargo test --locked
+
+      - name: test (dev-lk-jwt)
+        run: cargo test --locked --features dev-lk-jwt
