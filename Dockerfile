@@ -4,7 +4,7 @@
 #   docker build -t superdial-agent .                         # production: SuperExchange issuer only
 #   docker build --build-arg FEATURES=dev-lk-jwt -t superdial-agent:dev .   # development issuer too
 #
-# Never build this on workbench. The `livekit` crate's webrtc-sys downloads a prebuilt
+# Never build this on a machine short of memory or disk. The `livekit` crate's webrtc-sys downloads a prebuilt
 # libwebrtc and compiles C++ glue with clang 21; the result links only libc, libm and libgcc_s.
 
 FROM rust:1.98-bookworm AS build

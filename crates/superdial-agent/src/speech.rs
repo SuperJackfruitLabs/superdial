@@ -1,4 +1,4 @@
-//! The suite's speech services on foundry, through their OpenAI-compatible APIs:
+//! AgentPod's speech services (deploy/transcriber and deploy/speech), through their OpenAI-compatible APIs:
 //! `POST /v1/audio/transcriptions` (faster-whisper) and `POST /v1/audio/speech` (Kokoro). The
 //! request shapes are the hub's (`agentpod/apps/hub/src/services/speech`). superdial-agent uses
 //! its own key for both. Neither the audio nor the text is ever logged here.
@@ -13,7 +13,7 @@ use crate::{
     config::{SttConfig, TtsConfig},
 };
 
-/// Five minutes of audio takes about 82 s on foundry, and a queue can double it (the hub's limit).
+/// Five minutes of audio takes about 82 s on AgentPod's GPU host, and a queue can double it (the hub's limit).
 const STT_TIMEOUT: Duration = Duration::from_secs(6 * 60);
 /// The speech service's own deadline is 120 s (the hub's limit).
 const TTS_TIMEOUT: Duration = Duration::from_secs(150);
@@ -82,7 +82,7 @@ fn base(url: &str) -> String {
     url.trim_end_matches('/').to_owned()
 }
 
-/// foundry's agentpod-transcriber, or any OpenAI-compatible transcription service.
+/// AgentPod's transcriber, or any OpenAI-compatible transcription service.
 pub struct HttpTranscriber {
     url: String,
     api_key: String,
@@ -138,7 +138,7 @@ impl Transcriber for HttpTranscriber {
     }
 }
 
-/// foundry's agentpod-speech, or any OpenAI-compatible speech service.
+/// AgentPod's speech service, or any OpenAI-compatible speech service.
 pub struct HttpSynthesizer {
     url: String,
     api_key: String,

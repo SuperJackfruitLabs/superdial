@@ -81,9 +81,9 @@ with `{"room_id"}` and the same bearer.
 
 In a call it:
 - finds where each thing the caller says ends (an RMS gate, 800 ms of quiet);
-- has it transcribed by foundry's speech-to-text, then sends the transcript (C2) to the
+- has it transcribed by AgentPod's speech-to-text service, then sends the transcript (C2) to the
   caller's call device, which posts it to the room as the caller's message (C3);
-- speaks the hub's reply with foundry's Kokoro, after stripping markdown and capping it at
+- speaks the hub's reply with AgentPod's Kokoro speech service, after stripping markdown and capping it at
   about 1200 characters;
 - shows its state in the LiveKit attribute `superdial.state`: `connecting`, `listening`,
   `thinking`, `speaking`;
@@ -116,8 +116,8 @@ only with `SUPERDIAL_AGENT_LOG_TEXT=1`.
 docker build -t superdial-agent .
 docker run -d --name superdial-agent -p 127.0.0.1:8850:8850 -v superdial-agent:/var/lib/superdial-agent \
   -e SUPERDIAL_AGENT_TOKEN_FILE=/run/secrets/agent_token -e SUPERDIAL_HUB_URL=http://hub:3001 \
-  -e TRANSCRIBE_URL=http://foundry:8840 -e TRANSCRIBE_API_KEY_FILE=/run/secrets/stt_key \
-  -e SPEECH_URL=http://foundry:8841 -e SPEECH_API_KEY_FILE=/run/secrets/speech_key \
+  -e TRANSCRIBE_URL=http://speech.example:8840 -e TRANSCRIBE_API_KEY_FILE=/run/secrets/stt_key \
+  -e SPEECH_URL=http://speech.example:8841 -e SPEECH_API_KEY_FILE=/run/secrets/speech_key \
   -v /path/to/secrets:/run/secrets:ro superdial-agent
 ```
 

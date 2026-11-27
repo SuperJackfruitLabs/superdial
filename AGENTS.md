@@ -37,10 +37,10 @@ a machine short of memory, add `-j 6`.
 
 ## Integration test
 
-`scripts/integration-rtc-spike.sh` runs two test callers against the rtc-spike stack (tuwunel
-2.0.0 at `https://staging-rtc.superjackfruit.com`, LiveKit, lk-jwt-service as the dev token
-issuer). It needs two test users whose passwords are in `.local/` (gitignored), and a route to
-LiveKit's media ports (UDP 50100–50200 on the workbench tailnet address). See the script header.
+`scripts/integration-rtc-spike.sh` runs two test callers against a LiveKit dev stack (tuwunel
+2.0.0, LiveKit, and lk-jwt-service as the dev token issuer). Set `HS`, `SERVER`, `USER_A` and
+`USER_B`; the two test users' passwords go in `.local/pw_<user>` (gitignored). The machine needs
+a route to that LiveKit's media ports. See the script header.
 
 ```sh
 cargo build -p superdial-testcaller
@@ -51,13 +51,12 @@ KILL_TEST=1 ./scripts/integration-rtc-spike.sh # also kill -9 a caller and time 
 `scripts/integration-agent-rtc-spike.sh` runs superdial-agent (built with
 `--features superdial-agent/dev-lk-jwt`) against a fake hub (`scripts/fake_hub.py`) and a test
 caller: a spoken question, the reply heard back, and the cancel on hang-up and on DELETE. It
-uses `sdtest_b` as the stand-in agent with a second password-login device
+uses `USER_B` as the stand-in agent with a second password-login device
 (`.local/agent_device.json`), and speech services keyed with `.local/speech_key`; by default
 local copies of agentpod's transcriber and speech servers on ports 18840 and 18841
 (`.local/speech-standin/run.sh`). The dev issuer's tokens cannot set participant attributes, so
 the caller does not see `superdial.state` there; the agent's log shows the states it set.
 
-Do not build the image on workbench. `docker build --check .` lints the Dockerfile.
+Do not build the image on a machine short of memory or disk. `docker build --check .` lints the Dockerfile.
 
-Do not invite `@agent_echo` to test rooms: the spike bot still runs there and answers calls.
 Runs write their logs and recordings to `.local/run-*` (gitignored).

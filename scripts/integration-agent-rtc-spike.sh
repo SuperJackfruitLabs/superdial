@@ -1,25 +1,28 @@
 #!/usr/bin/env bash
-# superdial-agent in a call on the rtc-spike stack, with a fake hub and a headless caller.
+# superdial-agent in a call on a LiveKit dev stack, with a fake hub and a headless caller.
 #
 # Who is who:
-#   - caller: sdtest_a (superdial-testcaller), password in .local/pw_sdtest_a;
-#   - agent:  sdtest_b stands in for a bridge agent. A second device, logged in by password and
+#   - caller: $USER_A (superdial-testcaller), password in .local/pw_$USER_A;
+#   - agent:  $USER_B stands in for a bridge agent. A second device, logged in by password and
 #     saved in .local/agent_device.json, stands in for the hub-minted SUPERDIAL call device;
 #   - hub:    scripts/fake_hub.py (PUT, reply or DELETE, and the cancel route);
 #   - speech: TRANSCRIBE_URL / SPEECH_URL with the agent's own key in .local/speech_key
 #     (default: local copies of agentpod's transcriber and speech servers, .local/speech-standin);
-#   - token issuer: the rtc-spike's lk-jwt-service through the dev-only LkJwtDevIssuer.
+#   - token issuer: the dev stack's lk-jwt-service through the dev-only LkJwtDevIssuer.
 #
 # Three runs in one room:
 #   1. reply:  the caller asks a spoken question; the fake hub replies; the caller records it;
 #   2. hangup: the hub never replies; the caller hangs up; the agent must cancel the turn;
 #   3. delete: the hub DELETEs the call while the turn waits; the agent must cancel the turn.
 #
+# Set HS, SERVER, USER_A and USER_B (see integration-rtc-spike.sh).
 # Build first: cargo build -p superdial-testcaller -p superdial-agent --features superdial-agent/dev-lk-jwt
 set -euo pipefail
 
-HS=${HS:-https://staging-rtc.superjackfruit.com}
-SERVER=${SERVER:-staging-rtc.superjackfruit.com}
+HS=${HS:?set HS to the dev stack homeserver URL, e.g. https://matrix.example}
+SERVER=${SERVER:?set SERVER to its server name, e.g. matrix.example}
+USER_A=${USER_A:?set USER_A to the first test user localpart}
+USER_B=${USER_B:?set USER_B to the second test user localpart}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 TARGET=${CARGO_TARGET_DIR:-$ROOT/target}/debug
 LOCAL=$ROOT/.local
@@ -35,16 +38,16 @@ mkdir -p "$OUT"
 echo "output: $OUT"
 
 tc() {
-  "$TARGET/superdial-testcaller" --homeserver "$HS" --user sdtest_a --password-file "$LOCAL/pw_sdtest_a" \
+  "$TARGET/superdial-testcaller" --homeserver "$HS" --user "$USER_A" --password-file "$LOCAL/pw_$USER_A" \
     --data-dir "$LOCAL/data_a" "$@"
 }
 
 # The agent's call device: log in once, keep the session (mode 600), never print the token.
 if [ ! -s "$LOCAL/agent_device.json" ]; then
-  python3 - "$HS" "$LOCAL/pw_sdtest_b" "$LOCAL/agent_device.json" <<'PY'
+  python3 - "$HS" "$USER_B" "$LOCAL/pw_$USER_B" "$LOCAL/agent_device.json" <<'PY'
 import json, os, sys, urllib.request
-hs, pw_file, out = sys.argv[1:]
-body = {"type": "m.login.password", "identifier": {"type": "m.id.user", "user": "sdtest_b"},
+hs, user, pw_file, out = sys.argv[1:]
+body = {"type": "m.login.password", "identifier": {"type": "m.id.user", "user": user},
         "password": open(pw_file).read().strip(), "initial_device_display_name": "superdial-agent stand-in"}
 req = urllib.request.Request(f"{hs}/_matrix/client/v3/login", data=json.dumps(body).encode(),
                              headers={"content-type": "application/json", "user-agent": "superdial-integration"})

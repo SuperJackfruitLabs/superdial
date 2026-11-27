@@ -7,7 +7,7 @@ use std::{fmt, io, net::SocketAddr, path::Path, path::PathBuf};
 pub const DEFAULT_BIND: &str = "127.0.0.1:8850";
 /// The default state directory (one crypto store per call device beneath it).
 pub const DEFAULT_STATE_DIR: &str = "/var/lib/superdial-agent";
-/// The model asked for when `TRANSCRIBE_MODEL` is unset: what foundry's transcriber serves.
+/// The model asked for when `TRANSCRIBE_MODEL` is unset: what AgentPod's transcriber serves.
 pub const DEFAULT_TRANSCRIBE_MODEL: &str = "large-v3-turbo";
 
 /// Where speech-to-text is and how to ask it.
@@ -143,9 +143,9 @@ mod tests {
             ("SUPERDIAL_AGENT_TOKEN", "loopback-secret-1"),
             ("SUPERDIAL_HUB_URL", "http://127.0.0.1:3000"),
             ("SUPERDIAL_STATE_DIR", "/state"),
-            ("TRANSCRIBE_URL", "http://foundry:8840"),
+            ("TRANSCRIBE_URL", "http://speech.example:8840"),
             ("TRANSCRIBE_API_KEY", "stt-key-2"),
-            ("SPEECH_URL", "http://foundry:8841"),
+            ("SPEECH_URL", "http://speech.example:8841"),
             ("SPEECH_API_KEY", "tts-key-3"),
         ]
         .into_iter()
@@ -170,8 +170,8 @@ mod tests {
         assert_eq!(c.speech.api_key, "tts-key-3");
         assert_eq!(c.hub_url, "http://127.0.0.1:3000");
         assert_eq!(c.state_dir, PathBuf::from("/state"));
-        assert_eq!(c.transcribe.url, "http://foundry:8840");
-        assert_eq!(c.speech.url, "http://foundry:8841");
+        assert_eq!(c.transcribe.url, "http://speech.example:8840");
+        assert_eq!(c.speech.url, "http://speech.example:8841");
         assert!(c.store_passphrase.is_none());
         assert!(!c.log_text);
     }
@@ -277,6 +277,6 @@ mod tests {
         for secret in ["loopback-secret-1", "stt-key-2", "tts-key-3", "pass-phrase-4"] {
             assert!(!s.contains(secret), "{secret} leaked: {s}");
         }
-        assert!(s.contains("http://foundry:8840"));
+        assert!(s.contains("http://speech.example:8840"));
     }
 }

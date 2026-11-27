@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Two superdial test callers in one encrypted room's call on the rtc-spike stack.
+# Two superdial test callers in one encrypted room's call on a LiveKit dev stack.
 #
 # Prerequisites:
-#   - test users sdtest_a and sdtest_b on the rtc-spike homeserver, passwords in
-#     .local/pw_sdtest_a and .local/pw_sdtest_b (gitignored);
-#   - a route to LiveKit's media (the workbench tailnet address, UDP 50100-50200 or TCP 7881);
+#   - HS, SERVER, USER_A and USER_B set: a tuwunel 2.0.0 homeserver with LiveKit and
+#     lk-jwt-service, and two test users whose passwords are in .local/pw_$USER_A and
+#     .local/pw_$USER_B (gitignored);
+#   - a route to that LiveKit's media ports (its UDP range, or TCP 7881);
 #   - cargo build -p superdial-testcaller (BIN overrides the binary).
 #
-# Token issuer: the rtc-spike's lk-jwt-service, through the dev-only LkJwtDevIssuer.
+# Token issuer: the dev stack's lk-jwt-service, through the dev-only LkJwtDevIssuer.
 #
 # Checks: both sides report the peer's E2EE state Ok; each recording carries the other's tone
 # (A plays 440 Hz, B plays 660 Hz); B's C2 transcript reaches A and A posts it as C3; both
@@ -15,8 +16,10 @@
 # times how long the server takes to fire its delayed leave.
 set -euo pipefail
 
-HS=${HS:-https://staging-rtc.superjackfruit.com}
-SERVER=${SERVER:-staging-rtc.superjackfruit.com}
+HS=${HS:?set HS to the dev stack homeserver URL, e.g. https://matrix.example}
+SERVER=${SERVER:?set SERVER to its server name, e.g. matrix.example}
+USER_A=${USER_A:?set USER_A to the first test user localpart}
+USER_B=${USER_B:?set USER_B to the second test user localpart}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BIN=${BIN:-${CARGO_TARGET_DIR:-$ROOT/target}/debug/superdial-testcaller}
 LOCAL=$ROOT/.local
@@ -26,9 +29,10 @@ mkdir -p "$OUT"
 echo "output: $OUT"
 
 tc() {
-  local who=$1
+  local who=$1 user
+  if [ "$who" = a ]; then user=$USER_A; else user=$USER_B; fi
   shift
-  "$BIN" --homeserver "$HS" --user "sdtest_$who" --password-file "$LOCAL/pw_sdtest_$who" \
+  "$BIN" --homeserver "$HS" --user "$user" --password-file "$LOCAL/pw_$user" \
     --data-dir "$LOCAL/data_$who" "$@"
 }
 
@@ -40,7 +44,7 @@ for name, hz in (("a.wav", 440.0), ("b.wav", 660.0)):
         w.writeframes(b"".join(struct.pack("<h", int(8000 * math.sin(2 * math.pi * hz * i / 48000))) for i in range(48000 * 2)))
 PY
 
-ROOM=${ROOM:-$(tc a create-room --invite "@sdtest_b:$SERVER" 2>"$OUT/create.log" | jq -r .room_id)}
+ROOM=${ROOM:-$(tc a create-room --invite "@$USER_B:$SERVER" 2>"$OUT/create.log" | jq -r .room_id)}
 echo "room: $ROOM"
 
 tc b call --room "$ROOM" --issuer lk-jwt-dev --accept-invites --play "$OUT/b.wav" --record "$OUT/b-heard.wav" \
@@ -48,7 +52,7 @@ tc b call --room "$ROOM" --issuer lk-jwt-dev --accept-invites --play "$OUT/b.wav
 B=$!
 sleep 4
 tc a call --room "$ROOM" --issuer lk-jwt-dev --play "$OUT/a.wav" --record "$OUT/a-heard.wav" \
-  --seconds "$SECONDS_IN_CALL" --transcripts-from "@sdtest_b:$SERVER" >"$OUT/a.jsonl" 2>"$OUT/a.log" &
+  --seconds "$SECONDS_IN_CALL" --transcripts-from "@$USER_B:$SERVER" >"$OUT/a.jsonl" 2>"$OUT/a.log" &
 A=$!
 set +e
 wait $B; B_EXIT=$?
